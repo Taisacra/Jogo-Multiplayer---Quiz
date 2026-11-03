@@ -43,7 +43,7 @@ public class PerguntaDAO {
 
                     // 2. Instanciar o objeto Pergunta (exemplo a instanciar vazio e a usar setters)
                     Pergunta pergunta = new Pergunta(id,idCategoria, enunciado, altA, altB, altC, altD, respostaCorreta);
-                    
+
                     // adicionar a lista e será devolvida pelo método buscarIneditasPorCategoria
                     perguntas.add(pergunta);
                 }
