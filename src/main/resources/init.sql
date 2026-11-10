@@ -24,17 +24,15 @@ CREATE TABLE IF NOT EXISTS historico_resposta (
     FOREIGN KEY (pergunta_id) REFERENCES pergunta(id)
 );
 
-TRUNCATE TABLE categoria;
-TRUNCATE TABLE pergunta;
 
-INSERT INTO  categoria (nome) VALUES ("Ciência");
-INSERT INTO  categoria (nome) VALUES ("Geografia");
-INSERT INTO  categoria (nome) VALUES ("História");
-INSERT INTO  categoria (nome) VALUES ("TI");
-INSERT INTO  categoria (nome) VALUES ("Matemática");
+INSERT INTO categoria (nome) VALUES ('Ciência');
+INSERT INTO categoria (nome) VALUES ('Geografia');
+INSERT INTO categoria (nome) VALUES ('História');
+INSERT INTO categoria (nome) VALUES ('TI');
+INSERT INTO categoria (nome) VALUES ('Matemática');
 
 
-//Insert perguntas categória ciência. 
+-- Insert perguntas categória ciência. 
 INSERT INTO pergunta (categoria_id, enunciado, alternativa_a, alternativa_b, alternativa_c, alternativa_d, resposta_correta) VALUES
  ((SELECT id FROM categoria WHERE nome = 'Ciência'), 'Qual é o processo pelo qual as plantas produzem glicose a partir de luz, água e gás carbônico?', 'Respiração celular', 'Fermentação', 'Fotossíntese', 'Quimiossíntese', 'C'),
  ((SELECT id FROM categoria WHERE nome = 'Ciência'), 'Qual é o símbolo químico do sódio?', 'Na', 'So', 'Sd', 'S', 'A'),
@@ -62,7 +60,7 @@ INSERT INTO pergunta (categoria_id, enunciado, alternativa_a, alternativa_b, alt
  ((SELECT id FROM categoria WHERE nome = 'Ciência'), 'Qual tipo de onda se propaga no vácuo, sem precisar de meio material?', 'Som', 'Ondas na água', 'Ondas em uma corda', 'Ondas eletromagnéticas', 'D'),
  ((SELECT id FROM categoria WHERE nome = 'Ciência'), 'Qual ramo da biologia estuda a classificação dos seres vivos?', 'Taxonomia', 'Ecologia', 'Citologia', 'Genética', 'A');
 
-//Insert perguntas categória matemática 
+-- Insert perguntas categória matemática 
 INSERT INTO pergunta (categoria_id, enunciado, alternativa_a, alternativa_b, alternativa_c, alternativa_d, resposta_correta) VALUES
  ((SELECT id FROM categoria WHERE nome = 'Matemática'), 'Quantos graus mede a soma dos ângulos internos de um triângulo?', '180°', '90°', '270°', '360°', 'A'),
  ((SELECT id FROM categoria WHERE nome = 'Matemática'), 'Qual é o dobro de 3/4?', '1/2', '6/8', '3/8', '3/2', 'D'),
@@ -90,7 +88,7 @@ INSERT INTO pergunta (categoria_id, enunciado, alternativa_a, alternativa_b, alt
  ((SELECT id FROM categoria WHERE nome = 'Matemática'), 'Quantas diagonais tem um quadrado?', '2', '4', '1', '3', 'A'),
  ((SELECT id FROM categoria WHERE nome = 'Matemática'), 'Ao lançar um dado comum, qual é a probabilidade de sair um número par?', '1/6', '1/3', '1/2', '2/3', 'C');
 
-//Insert perguntas categória geografia
+-- Insert perguntas categória geografia
 INSERT INTO pergunta (categoria_id, enunciado, alternativa_a, alternativa_b, alternativa_c, alternativa_d, resposta_correta) VALUES
  ((SELECT id FROM categoria WHERE nome = 'Geografia'), 'Qual é o maior país do mundo em extensão territorial?', 'China', 'Canadá', 'Estados Unidos', 'Rússia', 'D'),
  ((SELECT id FROM categoria WHERE nome = 'Geografia'), 'Qual é o rio mais caudaloso do mundo?', 'São Francisco', 'Amazonas', 'Paraná', 'Tocantins', 'B'),
@@ -119,7 +117,7 @@ INSERT INTO pergunta (categoria_id, enunciado, alternativa_a, alternativa_b, alt
  ((SELECT id FROM categoria WHERE nome = 'Geografia'), 'Qual estreito separa a Ásia da América do Norte?', 'Estreito de Gibraltar', 'Estreito de Bering', 'Estreito de Magalhães', 'Estreito de Ormuz', 'B');
 
 
-//Insert perguntas categória História
+-- Insert perguntas categória História
 INSERT INTO pergunta (categoria_id, enunciado, alternativa_a, alternativa_b, alternativa_c, alternativa_d, resposta_correta) VALUES
  ((SELECT id FROM categoria WHERE nome = 'História'), 'Em que ano o Brasil declarou independência de Portugal?', '1822', '1500', '1889', '1808', 'A'),
  ((SELECT id FROM categoria WHERE nome = 'História'), 'Quem foi o primeiro presidente do Brasil?', 'Getúlio Vargas', 'Floriano Peixoto', 'Deodoro da Fonseca', 'Dom Pedro II', 'C'),
@@ -147,7 +145,7 @@ INSERT INTO pergunta (categoria_id, enunciado, alternativa_a, alternativa_b, alt
  ((SELECT id FROM categoria WHERE nome = 'História'), 'Qual acontecimento de 1929 provocou uma grande crise econômica mundial?', 'A crise do petróleo', 'A quebra da Bolsa de Nova York', 'A Revolução Chinesa', 'O Plano Marshall', 'B'),
  ((SELECT id FROM categoria WHERE nome = 'História'), 'Qual cidade foi a capital do Brasil imediatamente antes de Brasília?', 'Salvador', 'São Paulo', 'Rio de Janeiro', 'Belo Horizonte', 'C');
 
-//Insert perguntas categória TI
+-- Insert perguntas categória TI
 INSERT INTO pergunta (categoria_id, enunciado, alternativa_a, alternativa_b, alternativa_c, alternativa_d, resposta_correta) VALUES
  ((SELECT id FROM categoria WHERE nome = 'TI'), 'O que significa a sigla CPU?', 'Computer Personal Unit', 'Central Processing Unit', 'Central Program Utility', 'Control Processing Update', 'B'),
  ((SELECT id FROM categoria WHERE nome = 'TI'), 'Qual é a menor unidade de informação em um computador?', 'Byte', 'Kilobyte', 'Pixel', 'Bit', 'D'),
