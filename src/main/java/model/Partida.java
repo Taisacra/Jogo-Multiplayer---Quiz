@@ -1,7 +1,7 @@
 package model;
 
 public class Partida {
-    private String idPartida;
+    private int idPartida;
     private Jogador jogador1;
     private Jogador jogador2;
     private Jogador jogadorDaVez;
@@ -11,7 +11,7 @@ public class Partida {
 
     public Partida(){}
 
-    public Partida(String idPartida, Jogador jogador1, Jogador jogador2, Jogador jogadorDaVez, Categoria categoriaRodadaAtual, int perguntasRespondidasNaRodada, boolean finalizada) {
+    public Partida(int idPartida, Jogador jogador1, Jogador jogador2, Jogador jogadorDaVez, Categoria categoriaRodadaAtual, int perguntasRespondidasNaRodada, boolean finalizada) {
         this.idPartida = idPartida;
         this.jogador1 = jogador1;
         this.jogador2 = jogador2;
@@ -21,11 +21,11 @@ public class Partida {
         this.finalizada = finalizada;
     }
 
-    public String getIdPartida() {
+    public int getIdPartida() {
         return idPartida;
     }
 
-    public void setIdPartida(String idPartida) {
+    public void setIdPartida(int idPartida) {
         this.idPartida = idPartida;
     }
 

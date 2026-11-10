@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS pergunta (
 );
 
 CREATE TABLE IF NOT EXISTS historico_resposta (
+	partida_id INT NOT NULL,
     jogador_id INT,
     pergunta_id INT,
     acertou BOOLEAN,

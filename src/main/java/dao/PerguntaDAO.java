@@ -10,22 +10,24 @@ public class PerguntaDAO {
 
     /**
      * Busca perguntas inéditas de uma categoria para formar a rodada do jogador.
+     * O JOGADOR NAO PODE TER RESPONDIDO NESTA PARTIDA
      */
-    public List<Pergunta> buscarIneditasPorCategoria(int categoriaId, int jogadorId, int limite) {
+    public List<Pergunta> buscarIneditasPorCategoria(int categoriaId, int partidaId, int jogadorId, int limite) {
         List<Pergunta> perguntas = new ArrayList<>();
 
         // Retorna apenas perguntas que NÃO estão no histórico do jogador
         String sql = "SELECT * FROM pergunta p " +
                 "WHERE p.categoria_id = ? AND p.id NOT IN (" +
-                "  SELECT h.pergunta_id FROM historico_resposta h WHERE h.jogador_id = ?" +
+                "  SELECT h.pergunta_id FROM historico_resposta h WHERE h.partida_id = ? AND h.jogador_id = ?" +
                 ") ORDER BY RAND() LIMIT ?";
 
         try (Connection conn = ConexaoH2.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
             stmt.setInt(1, categoriaId);
-            stmt.setInt(2, jogadorId);
-            stmt.setInt(3, limite);
+            stmt.setInt(2, partidaId);
+            stmt.setInt(3, jogadorId);
+            stmt.setInt(4, limite);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
