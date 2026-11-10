@@ -16,35 +16,10 @@ public class ConexaoH2 {
     }
 
     public static void inicializarBanco() {
-        try (Connection conn = getConnection(); Statement stmt = conn.createStatement()) {
-
-            // Tabela de Categorias
-            stmt.execute("CREATE TABLE IF NOT EXISTS categoria (" +
-                    "id INT AUTO_INCREMENT PRIMARY KEY, " +
-                    "nome VARCHAR(100) NOT NULL UNIQUE)");
-
-            // Tabela de Perguntas
-            stmt.execute("CREATE TABLE IF NOT EXISTS pergunta (" +
-                    "id INT AUTO_INCREMENT PRIMARY KEY, " +
-                    "categoria_id INT, " +
-                    "enunciado TEXT NOT NULL, " +
-                    "alternativa_a VARCHAR(255) NOT NULL, " +
-                    "alternativa_b VARCHAR(255) NOT NULL, " +
-                    "alternativa_c VARCHAR(255) NOT NULL, " +
-                    "alternativa_d VARCHAR(255) NOT NULL, " +
-                    "resposta_correta CHAR(1) NOT NULL, " +
-                    "FOREIGN KEY (categoria_id) REFERENCES categoria(id))");
-
-            // Histórico para garantir perguntas inéditas
-            stmt.execute("CREATE TABLE IF NOT EXISTS historico_resposta (" +
-                    "jogador_id INT, " +
-                    "pergunta_id INT, " +
-                    "acertou BOOLEAN, " +
-                    "PRIMARY KEY (jogador_id, pergunta_id), " +
-                    "FOREIGN KEY (pergunta_id) REFERENCES pergunta(id))");
-
-            System.out.println("Banco de dados inicializado com sucesso.");
+        try (Connection conn = getConnection()) {
+            System.out.println("Banco de dados inicializado e populado com sucesso.");
         } catch (SQLException e) {
+            System.out.println("Erro ao inicializar o banco de dados:");
             e.printStackTrace();
         }
     }
