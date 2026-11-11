@@ -23,7 +23,7 @@ public class HistoricoRespostaDAO {
         }
     }
     
-    //método para limpar o historico_resposta ao fim de uma partida
+    //método para limpar o historico_resposta ao fim de uma execucao
     public void limparTodo() {
         String sql = "DELETE FROM historico_resposta";
         try (Connection conn = ConexaoH2.getConnection();

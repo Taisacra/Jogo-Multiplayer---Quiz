@@ -44,6 +44,11 @@ public class PartidaService {
 	
 	private int proximoIdPartida = 1;
 	
+	//Método para limpar os historicos de execucoes anteriores
+    public PartidaService() {
+    	historicoDAO.limparTodo();
+    }
+	
 	
 	//Método que cria a partida
 	public synchronized Partida criarPartida(String nomeJogador1, String nomeJogador2) {
@@ -60,16 +65,17 @@ public class PartidaService {
 		//Sorteio para ver quem começa
 		Jogador primeiro = random.nextBoolean() ? j1 : j2;
 		
+		//Cria a partida e coloca no Map partidas
 		Partida partida = new Partida(proximoIdPartida++, j1, j2, primeiro, null, 0, false);
 		partidas.put(partida.getIdPartida(), partida);
-		iniciarRodada(partida);
+		iniciarRodada(partida); //Chama o método que inicia a primeira rodada
 		
 		return partida;
 		
 	}
 	
 	
-	//Método que controla cada jogada
+	//Método que controla toda a partida
 	public synchronized ResultadoRespostaDTO responder(int partidaId, int jogadorId, int perguntaId, char alternativa) {
 		
 		Partida partida = obterPartida(partidaId);
@@ -96,15 +102,15 @@ public class PartidaService {
 		 //se errar
 		 if (!acertou) {
 	            Jogador adversario = adversario(partida, jogador);
-	            partida.setJogadorDaVez(adversario);
-	            boolean rodadaFormada = iniciarRodada(partida);
+	            partida.setJogadorDaVez(adversario); //muda para o adversario
+	            boolean rodadaFormada = iniciarRodada(partida); 
 	            
 	            if (rodadaFormada) {
 	                return new ResultadoRespostaDTO(false, true, false, false,
 	                        "Resposta errada. A vez passa para " + adversario.getNome() + ".");
 	            } 
 	            
-	         //se o adversário não tinha 3 perguntas inéditas: perde, e quem errou vence
+	         //se o adversário não tinha 3 perguntas inéditas- perde, e quem errou vence
 	            return new ResultadoRespostaDTO(false, true, false, true,
 	                    "Resposta errada, mas " + adversario.getNome()
 	                            + " não tem 3 perguntas inéditas na categoria sorteada e perdeu. Você venceu!");
@@ -118,19 +124,20 @@ public class PartidaService {
 	            return new ResultadoRespostaDTO(true, false, false, false, "Resposta correta!");
 	        }
 	 
-	        // ---- acertou as 3: conquista a estrela da categoria
+	        // se acertou as 3 perguntas da rodada: conquista a estrela da categoria
 	        Categoria conquistada = partida.getCategoriaRodadaAtual();
 	        if (!jaConquistou(jogador, conquistada)) {
 	            jogador.adicionarEstrela(conquistada);
 	        }
-	 
+	        
+	        //se ele conquistar todas as estrelas
 	        if (jogador.getEstrelasConquistadas().size() >= categorias.size()) {
 	            finalizar(partida, jogador);
 	            return new ResultadoRespostaDTO(true, true, true, true,
 	                    "Você conquistou a estrela de " + conquistada.getNome() + " e venceu a partida!");
 	        }
 	 
-	        // continua jogando, em uma nova categoria
+	        //se nao conquistou todas e continua jogando, em uma nova categoria
 	        boolean rodadaFormada = iniciarRodada(partida);
 	        if (rodadaFormada) {
 	            return new ResultadoRespostaDTO(true, true, true, false,
@@ -142,10 +149,9 @@ public class PartidaService {
 	                        + "categoria sorteada. Você perdeu a partida.");
 	}
 	 
-//consultas
 	
 	 
-    /** Pergunta que o jogador da vez deve responder agora (sem o gabarito). */
+    //Métodos de consulta
     public synchronized PerguntaDTO getPerguntaAtual(int partidaId) {
         Partida partida = obterPartida(partidaId);
         if (partida.isFinalizada()) {
@@ -172,24 +178,22 @@ public class PartidaService {
         return obterPartida(partidaId).isFinalizada();
     }
  
-    /** Vencedor da partida, ou null se ela ainda não terminou. */
+    // Vencedor da partida, ou null se ela ainda não terminou
     public synchronized Jogador getVencedor(int partidaId) {
         return vencedores.get(partidaId);
     }
     
-    public PartidaService() {
-    	historicoDAO.limparTodo();
-    }
 	
 	
 	 /**
-	  * Método que inicia rodada: sorteia a categoria e monta a rodada com 3 perguntas ineditas.
-	  * Se não houver 3 perguntas inéditas, o jogador da vez perde e o outro ganha.
+	  * Método que inicia rodada: sorteia a categoria e monta a rodada com 3 perguntas ineditas
+	  * Se não houver 3 perguntas inéditas, o jogador da vez perde e o outro ganha
 	  */
 	
 	private boolean iniciarRodada (Partida partida) {
 		Jogador jogador = partida.getJogadorDaVez();
 		
+		//Lista categorias que ainda estao disponiveis
 		List<Categoria> disponiveis = categorias.stream()
                 .filter(c -> !jaConquistou(jogador, c))
                 .collect(Collectors.toList());
@@ -197,12 +201,14 @@ public class PartidaService {
 			throw new IllegalStateException("Jogador sem categorias restantes, mas a partida não terminou.");
 		}
 		
+		//Sorteia uma categoria disponivel
 		Categoria sorteada = disponiveis.get(random.nextInt(disponiveis.size()));
 		List<Pergunta> perguntas = perguntaDAO.buscarIneditasPorCategoria(sorteada.getIdCategoria(), partida.getIdPartida(), jogador.getId(), PERGUNTAS_POR_RODADA);
 		
 		partida.setCategoriaRodadaAtual(sorteada);
 		partida.setPerguntasRespondidasNaRodada(0);
 		
+		//Verifica se tem mais perguntas disponíveis do que respondidas
 		if (perguntas.size() < PERGUNTAS_POR_RODADA) {
             finalizar(partida, adversario(partida, jogador));
             return false; //retorna false se terminar por derrota
@@ -213,13 +219,14 @@ public class PartidaService {
 	}
 	
 	
+	//Método que finaliza a partida
     private void finalizar(Partida partida, Jogador vencedor) {
         partida.setFinalizada(true);
         vencedores.put(partida.getIdPartida(), vencedor);
         perguntasDaRodada.remove(partida.getIdPartida());
     }
     
-    
+    //Método que pega as 3 perguntas dessa partida
     private Pergunta perguntaAtual(Partida partida) {
         List<Pergunta> rodada = perguntasDaRodada.get(partida.getIdPartida());
         return rodada.get(partida.getPerguntasRespondidasNaRodada());
@@ -233,6 +240,7 @@ public class PartidaService {
         return p;
     }
     
+    //método que muda para o outro jogador - se for jogador1, muda para jogador 2, vice-versa
 	 private Jogador adversario(Partida partida, Jogador jogador) {
 		 return partida.getJogador1().getId() == jogador.getId() ? partida.getJogador2() : partida.getJogador1();
 	  }
