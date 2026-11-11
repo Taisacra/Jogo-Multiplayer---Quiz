@@ -22,4 +22,15 @@ public class HistoricoRespostaDAO {
             e.printStackTrace();
         }
     }
+    
+    //método para limpar o historico_resposta ao fim de uma partida
+    public void limparTodo() {
+        String sql = "DELETE FROM historico_resposta";
+        try (Connection conn = ConexaoH2.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
 }

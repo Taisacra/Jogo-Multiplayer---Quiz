@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS historico_resposta (
     jogador_id INT,
     pergunta_id INT,
     acertou BOOLEAN,
-    PRIMARY KEY (jogador_id, pergunta_id),
+    PRIMARY KEY (partida_id, jogador_id, pergunta_id),
     FOREIGN KEY (pergunta_id) REFERENCES pergunta(id)
 );
 

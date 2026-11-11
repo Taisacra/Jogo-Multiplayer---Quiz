@@ -4,7 +4,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 import common.dto.PerguntaDTO;
@@ -177,7 +176,10 @@ public class PartidaService {
     public synchronized Jogador getVencedor(int partidaId) {
         return vencedores.get(partidaId);
     }
- 
+    
+    public PartidaService() {
+    	historicoDAO.limparTodo();
+    }
 	
 	
 	 /**
@@ -210,11 +212,13 @@ public class PartidaService {
 		return true; //retorna true se a rodada foi formada
 	}
 	
+	
     private void finalizar(Partida partida, Jogador vencedor) {
         partida.setFinalizada(true);
         vencedores.put(partida.getIdPartida(), vencedor);
         perguntasDaRodada.remove(partida.getIdPartida());
     }
+    
     
     private Pergunta perguntaAtual(Partida partida) {
         List<Pergunta> rodada = perguntasDaRodada.get(partida.getIdPartida());
