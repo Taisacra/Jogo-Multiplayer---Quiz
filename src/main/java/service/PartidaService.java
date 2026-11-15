@@ -167,7 +167,7 @@ public class PartidaService {
         return new PlacarDTO(
                 p.getJogador1().getNome(), nomesDasEstrelas(p.getJogador1()),
                 p.getJogador2().getNome(), nomesDasEstrelas(p.getJogador2()),
-                p.getJogadorDaVez().getNome());
+                p.getJogadorDaVez().getNome(), p.getJogadorDaVez().getId());
     }
  
     public synchronized Partida getPartida(int partidaId) {

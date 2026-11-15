@@ -14,14 +14,17 @@ public class PlacarDTO implements Serializable {
 
     private String nomeJogadorDaVez;
 
+    private int jogadorDaVezId;
+
     public PlacarDTO(){}
 
-    public PlacarDTO(String nomeJogador1, List<String> estrelasJogador1, String nomeJogador2, List<String> estrelasJogador2, String nomeJogadorDaVez) {
+    public PlacarDTO(String nomeJogador1, List<String> estrelasJogador1, String nomeJogador2, List<String> estrelasJogador2, String nomeJogadorDaVez, int jogadorDaVezId) {
         this.nomeJogador1 = nomeJogador1;
         this.estrelasJogador1 = estrelasJogador1;
         this.nomeJogador2 = nomeJogador2;
         this.estrelasJogador2 = estrelasJogador2;
         this.nomeJogadorDaVez = nomeJogadorDaVez;
+        this.jogadorDaVezId = jogadorDaVezId;
     }
 
     public String getNomeJogador1() {
@@ -62,5 +65,13 @@ public class PlacarDTO implements Serializable {
 
     public void setNomeJogadorDaVez(String nomeJogadorDaVez) {
         this.nomeJogadorDaVez = nomeJogadorDaVez;
+    }
+
+    public int getJogadorDaVezId() {
+        return jogadorDaVezId;
+    }
+
+    public void setJogadorDaVezId(int jogadorDaVezId) {
+        this.jogadorDaVezId = jogadorDaVezId;
     }
 }
