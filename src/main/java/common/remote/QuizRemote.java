@@ -15,7 +15,7 @@ public interface QuizRemote extends Remote {
     // O primeiro jogador consulta periodicamente até o adversário entrar
     EntradaDTO consultarEntrada() throws RemoteException;
 
-    PerguntaDTO getPerguntaAtual(int partidaId) throws RemoteException;
+    PerguntaDTO getPerguntaAtual(int partidaId, int jogadorId) throws RemoteException;
 
     ResultadoRespostaDTO responder(int partidaId, int jogadorId, int perguntaId, char alternativa)
             throws RemoteException;

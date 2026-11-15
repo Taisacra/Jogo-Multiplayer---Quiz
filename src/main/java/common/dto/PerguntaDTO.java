@@ -10,12 +10,14 @@ public class PerguntaDTO implements Serializable {
     private String categoria;
     private String enunciado;
     private List<String> alternativas;
+    private int segundosRestantes; // tempo que falta para pergunta expirar
 
     public PerguntaDTO(int id, String categoria, String enunciado, List<String> alternativas) {
         this.id = id;
         this.categoria = categoria;
         this.enunciado = enunciado;
         this.alternativas = alternativas;
+        this.segundosRestantes = 0;
     }
 
     public int getId() {
@@ -49,4 +51,8 @@ public class PerguntaDTO implements Serializable {
     public void setAlternativas(List<String> alternativas) {
         this.alternativas = alternativas;
     }
+
+    public int getSegundosRestantes() {  return segundosRestantes;}
+
+    public void setSegundosRestantes(int segundosRestantes) { this.segundosRestantes = segundosRestantes; }
 }
