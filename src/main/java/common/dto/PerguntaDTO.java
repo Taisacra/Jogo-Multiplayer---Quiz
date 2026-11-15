@@ -12,12 +12,12 @@ public class PerguntaDTO implements Serializable {
     private List<String> alternativas;
     private int segundosRestantes; // tempo que falta para pergunta expirar
 
-    public PerguntaDTO(int id, String categoria, String enunciado, List<String> alternativas) {
+    public PerguntaDTO(int id, String categoria, String enunciado, List<String> alternativas, int segundosRestantes) {
         this.id = id;
         this.categoria = categoria;
         this.enunciado = enunciado;
         this.alternativas = alternativas;
-        this.segundosRestantes = 0;
+        this.segundosRestantes = segundosRestantes;
     }
 
     public int getId() {
