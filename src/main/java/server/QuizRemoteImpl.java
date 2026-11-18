@@ -34,54 +34,54 @@ import service.PartidaService;
 
 public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote, PartidaListener{
 
-	private static final long serialVersionUID = 1L;
-	
-	//Porta fixa do objeto remoto
-	public static final int PORTA_OBJETO = 1100;
-		
-	private final PartidaService service = new PartidaService();
-	
-	//Fila de entrada
-	
-	private static final class Espera{
-		final String nome;
-		final ClienteCallback callback;
-		
-		Espera (String nome, ClienteCallback callback){
-			this.nome = nome;
-			this.callback = callback;
-		}
-		
-	}
-	
-	//Nome do 1o jogador -- null se ninguem espera
-	private Espera espera;
+    private static final long serialVersionUID = 1L;
 
-	//Callbacks das partidas em andamento: partidaId -> (jogadorId -> callback do cliente)
+    //Porta fixa do objeto remoto
+    public static final int PORTA_OBJETO = 1100;
+
+    private final PartidaService service = new PartidaService();
+
+    //Fila de entrada
+
+    private static final class Espera{
+        final String nome;
+        final ClienteCallback callback;
+
+        Espera (String nome, ClienteCallback callback){
+            this.nome = nome;
+            this.callback = callback;
+        }
+
+    }
+
+    //Nome do 1o jogador -- null se ninguem espera
+    private Espera espera;
+
+    //Callbacks das partidas em andamento: partidaId -> (jogadorId -> callback do cliente)
     private final transient Map<Integer, Map<Integer, ClienteCallback>> callbacks = new ConcurrentHashMap<>();
-    
+
     // Uma thread por partida, para os avisos saírem na ordem e um cliente lento não atrasar as outras partidas
     private final transient Map<Integer, ExecutorService> notificadores = new ConcurrentHashMap<>();
-	
+
     public QuizRemoteImpl() throws RemoteException{
-    	super(PORTA_OBJETO);
-    	service.setOuvinte(this);
+        super(PORTA_OBJETO);
+        service.setOuvinte(this);
     }
-    
+
     //Entrada: 
     @Override
-    public synchronized EntradaDTO entrarNaPartida(String nomeJogador, ClienteCallback callback) {
-    	
-    	String nome = validarNome(nomeJogador);
-    	if (callback == null) {
+    public EntradaDTO entrarNaPartida(String nomeJogador, ClienteCallback callback) {
+
+        String nome = validarNome(nomeJogador);
+        if (callback == null) {
             throw new IllegalArgumentException("O callback do cliente não foi informado.");
         }
-    	Espera novo = new Espera(nome, callback);
-    	
-    	while (true) {
-    		
+        Espera novo = new Espera(nome, callback);
+
+        while (true) {
+
             Espera primeiro;
-            
+
             synchronized (this) {
                 if (espera == null) {
                     // Ninguém esperando: este jogador é o 1º. O aviso de início chegará por callback.
@@ -100,8 +100,8 @@ public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote, P
             System.out.println("Jogador \"" + primeiro.nome + "\" saiu da fila sem avisar e foi descartado.");
         }
     }
-    
-    
+
+
     private EntradaDTO iniciarPartida(Espera primeiro, Espera segundo) {
         Partida partida = service.criarPartida(primeiro.nome, segundo.nome);
         int partidaId = partida.getIdPartida();
@@ -119,9 +119,9 @@ public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote, P
 
         return new EntradaDTO(partidaId, 2, true);
     }
-    
+
     //Repassa para o service
- 
+
     @Override
     public PerguntaDTO getPerguntaAtual(int partidaId, int jogadorId) {
         return service.getPerguntaAtual(partidaId, jogadorId);
@@ -147,7 +147,7 @@ public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote, P
         Jogador vencedor = service.getVencedor(partidaId);
         return vencedor == null ? null : vencedor.getNome();
     }
-    
+
     @Override
     public void ping(int partidaId, int jogadorId) {
         service.registrarSinal(partidaId, jogadorId);
@@ -162,7 +162,7 @@ public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote, P
     public String getMotivoFim(int partidaId) {
         return service.getMotivoFim(partidaId);
     }
-    
+
     //Eventos do Service
     //Chamados de DENTRO do bloqueio do service: só enfileiram e voltam na hora.
 
@@ -260,17 +260,17 @@ public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote, P
         }
     }
 
-    
+
     //Métodos de apoio
-    
+
     private ExecutorService executorDa(int partidaId) {
         return notificadores.computeIfAbsent(partidaId, id -> Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "notificador-partida-" + id);
             t.setDaemon(true); // não impede a JVM de encerrar
             return t;
         }));
-     }
-        
+    }
+
     private static boolean estaConectado(ClienteCallback callback) {
         try {
             callback.verificarConexao();
@@ -279,12 +279,12 @@ public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote, P
             return false;
         }
     }
-        
+
     private static String validarNome(String nome) {
         if (nome == null || nome.trim().isEmpty()) {
             throw new IllegalArgumentException("Informe o nome do jogador.");
         }
         return nome.trim();
     }
-    
+
 }
