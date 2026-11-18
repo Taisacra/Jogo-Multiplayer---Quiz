@@ -15,14 +15,14 @@ import java.rmi.registry.Registry;
  */
 public class ServidorMain {
 
-    //Porta do RMI Registry
+    /** Porta do RMI Registry (padrão do RMI) — figura 1 do relatório. */
     public static final int PORTA_REGISTRY = 1099;
 
-    //Nome que o objeto remoto fica registrado - o cliente usa o mesmo nome no lookup.
+    /** Nome sob o qual o objeto remoto fica registrado; o cliente usa o mesmo nome no lookup. */
     public static final String NOME_SERVICO = "QuizRemote";
 
-    //O Registry e o objeto remoto precisam de uma referência forte (static): sem ela o coletor de lixo
-    //poderia descartá-los, e o servidor pararia de responder sem nenhum erro.
+    // O Registry e o objeto remoto precisam de uma referência forte: sem ela o coletor de lixo
+    // poderia descartá-los, e o servidor pararia de responder sem nenhum erro.
     private static Registry registry;
     private static QuizRemoteImpl quiz;
 
@@ -35,13 +35,17 @@ public class ServidorMain {
                 System.setProperty("java.rmi.server.hostname", args[0]);
             }
 
-            //Banco primeiro: o PartidaService (criado dentro do QuizRemoteImpl) já usa o banco
+            // 1b) Tempo máximo que o servidor espera a resposta de um cliente numa chamada de callback.
+            //     Sem isso, um cliente travado ou com a rede caída prenderia os avisos da partida por muito tempo.
+            System.setProperty("sun.rmi.transport.tcp.responseTimeout", "5000");
+
+            // 2) Banco primeiro: o PartidaService (criado dentro do QuizRemoteImpl) já usa o banco
             ConexaoH2.inicializarBanco();
 
-            //Cria o objeto remoto; ele é exportado na porta 1100
+            // 3) Cria o objeto remoto; ele é exportado na porta 1100
             quiz = new QuizRemoteImpl();
 
-            //Cria o Registry na porta 1099 e registra o objeto (bind) para os clientes encontrarem
+            // 4) Cria o Registry na porta 1099 e registra o objeto (bind) para os clientes encontrarem
             registry = LocateRegistry.createRegistry(PORTA_REGISTRY);
             registry.rebind(NOME_SERVICO, quiz);
 
