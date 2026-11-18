@@ -1,5 +1,6 @@
 package service;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +34,12 @@ import model.Pergunta;
  * roda aqui no servidor (o cliente só exibe a contagem) e começa quando o jogador da
  * vez busca a pergunta (getPerguntaAtual). Se o tempo esgotar, o serviço trata como
  * resposta errada e passa a vez ao adversário.
+ * 
+ * * DESCONEXÃO: o servidor não é avisado quando um cliente cai, então cada cliente envia um
+ * sinal de vida (registrarSinal) a cada poucos segundos. Uma tarefa periódica (verificarConexoes) encerra a partida, dando a vitória ao adversário, se um jogador ficar mais de
+ * SEGUNDOS_SEM_SINAL_PARA_DESCONECTAR sem dar sinal. Quem sai de propósito chama sairDaPartida,
+ * e o fim é imediato.
+ * 
  */
 
 public class PartidaService {
@@ -66,6 +73,29 @@ public class PartidaService {
 	// Para cada partida: o alarme agendado (para poder cancelar) e o horário limite
 	private final Map<Integer, ScheduledFuture<?>> alarmes = new HashMap<>();
 	private final Map<Integer, Long> prazos = new HashMap<>();
+	
+	//Controle de desconexão - sem sinal de vida por mais que isso é considerado desconectado
+	private static final int SEGUNDOS_SEM_SINAL_PARA_DESCONECTAR = 10;
+    // De quanto em quanto tempo o servidor confere os sinais
+    private static final int INTERVALO_VIGIA_SEGUNDOS = 2;
+	
+    /** Para cada partida em andamento: jogadorId -> instante (System.nanoTime) do último sinal.
+     * A partida sai deste mapa quando termina.
+     */
+    private final Map<Integer, Map<Integer, Long>> ultimosSinais = new HashMap<>();
+    // Motivo do fim quando não foi o fim normal (hoje, só desconexão)
+    private final Map<Integer, String> motivosFim = new HashMap<>();
+
+    /**Aviso de eventos
+     *  O serviço não conhece RMI: só avisa este ouvinte (o servidor), que deve apenas enfileirar o
+     *  aviso e voltar, pois os avisos são disparados de dentro de blocos synchronized.
+     */
+    
+    private volatile PartidaListener ouvinte;
+
+    public void setOuvinte(PartidaListener ouvinte) {
+        this.ouvinte = ouvinte;
+    }
 
 	private final Random random = new Random();
 
@@ -74,6 +104,10 @@ public class PartidaService {
 	//Método para limpar os historicos de execucoes anteriores
 	public PartidaService() {
 		historicoDAO.limparTodo();
+		// Liga o vigia de conexões: roda de tempos em tempos na mesma thread do relógio
+        relogio.scheduleWithFixedDelay(this::verificarConexoes,
+                INTERVALO_VIGIA_SEGUNDOS, INTERVALO_VIGIA_SEGUNDOS, TimeUnit.SECONDS);
+    
 	}
 
 
@@ -95,6 +129,12 @@ public class PartidaService {
 		//Cria a partida e coloca no Map partidas
 		Partida partida = new Partida(proximoIdPartida++, j1, j2, primeiro, null, 0, false);
 		partidas.put(partida.getIdPartida(), partida);
+		
+		//Os dois jogadores começam com um sinal de vida "de agora" (tempo para o cliente iniciar o ping)
+        Map<Integer, Long> sinais = new HashMap<>();
+        sinais.put(j1.getId(), System.nanoTime());
+        sinais.put(j2.getId(), System.nanoTime());
+        ultimosSinais.put(partida.getIdPartida(), sinais);
 
 		//Inicia a primeira rodada e, se ela foi formada, prepara a primeira pergunta
 		boolean rodadaFormada = iniciarRodada(partida);
@@ -106,76 +146,84 @@ public class PartidaService {
 	}
 
 
-	//Método que controla toda a partida
-	public synchronized ResultadoRespostaDTO responder(int partidaId, int jogadorId, int perguntaId, char alternativa) {
+	//Método que controla toda a partida - processa a resposta e depois avisa os clientes da mudança
+    public synchronized ResultadoRespostaDTO responder(int partidaId, int jogadorId, int perguntaId, char alternativa) {
+        ResultadoRespostaDTO resultado = processarResposta(partidaId, jogadorId, perguntaId, alternativa);
+        notificarMudanca(partidaId);
+        return resultado;
+    }
+	
+    //Regras da resposta (o corpo que antes ficava direto em responder)
+    private ResultadoRespostaDTO processarResposta(int partidaId, int jogadorId, int perguntaId, char alternativa) {
 
-		Partida partida = obterPartida(partidaId);
-		if (partida.isFinalizada()) {
-			throw new IllegalStateException("A partida já foi encerrada.");
-		}
+        Partida partida = obterPartida(partidaId);
+        if (partida.isFinalizada()) {
+            throw new IllegalStateException("A partida já foi encerrada.");
+        }
 
-		Jogador jogador = partida.getJogadorDaVez();
-		if (jogador.getId() != jogadorId) {
-			throw new IllegalStateException("Não é a vez deste jogador.");
-		}
+        marcarSinal(partidaId, jogadorId); //quem responde está claramente conectado
 
-		Pergunta atual = perguntaAtual(partida);
-		if (atual.getIdPergunta() != perguntaId) {
-			throw new IllegalArgumentException("Esta não é a pergunta atual da rodada.");
-		}
+        Jogador jogador = partida.getJogadorDaVez();
+        if (jogador.getId() != jogadorId) {
+            throw new IllegalStateException("Não é a vez deste jogador.");
+        }
 
-		//Confere o prazo: se a resposta chegou depois do limite, conta como tempo esgotado
-		Long prazo = prazos.get(partidaId);
-		if (prazo != null && System.currentTimeMillis() > prazo + FOLGA_MS) {
-			return processarErro(partida, jogador, "Tempo esgotado");
-		}
+        Pergunta atual = perguntaAtual(partida);
+        if (atual.getIdPergunta() != perguntaId) {
+            throw new IllegalArgumentException("Esta não é a pergunta atual da rodada.");
+        }
 
-		boolean acertou = Character.toUpperCase(alternativa) ==
-				Character.toUpperCase(atual.getRespostaCorreta());
+        //Confere o prazo: se a resposta chegou depois do limite, conta como tempo esgotado
+        Long prazo = prazos.get(partidaId);
+        if (prazo != null && System.currentTimeMillis() > prazo + FOLGA_MS) {
+            return processarErro(partida, jogador, "Tempo esgotado");
+        }
 
-		//se errar
-		if (!acertou) {
-			return processarErro(partida, jogador, "Resposta errada");
-		}
+        boolean acertou = Character.toUpperCase(alternativa) ==
+                Character.toUpperCase(atual.getRespostaCorreta());
 
-		//se acertar
-		historicoDAO.registrarResposta(partida.getIdPartida(), jogador.getId(),
-				atual.getIdPergunta(), true);
+        //se errar
+        if (!acertou) {
+            return processarErro(partida, jogador, "Resposta errada");
+        }
 
-		int respondidas = partida.getPerguntasRespondidasNaRodada() + 1;
-		partida.setPerguntasRespondidasNaRodada(respondidas);
+        //se acertar
+        historicoDAO.registrarResposta(partida.getIdPartida(), jogador.getId(),
+                atual.getIdPergunta(), true);
 
-		if (respondidas < PERGUNTAS_POR_RODADA) {
-			prepararPergunta(partida); //a próxima pergunta só terá relógio quando o jogador a abrir
-			return new ResultadoRespostaDTO(true, false, false, false, "Resposta correta!");
-		}
+        int respondidas = partida.getPerguntasRespondidasNaRodada() + 1;
+        partida.setPerguntasRespondidasNaRodada(respondidas);
 
-		// se acertou as 3 perguntas da rodada: conquista a estrela da categoria
-		Categoria conquistada = partida.getCategoriaRodadaAtual();
-		if (!jaConquistou(jogador, conquistada)) {
-			jogador.adicionarEstrela(conquistada);
-		}
+        if (respondidas < PERGUNTAS_POR_RODADA) {
+            prepararPergunta(partida); //a próxima pergunta só terá relógio quando o jogador a abrir
+            return new ResultadoRespostaDTO(true, false, false, false, "Resposta correta!");
+        }
 
-		//se ele conquistar todas as estrelas
-		if (jogador.getEstrelasConquistadas().size() >= categorias.size()) {
-			finalizar(partida, jogador);
-			return new ResultadoRespostaDTO(true, true, true, true,
-					"Você conquistou a estrela de " + conquistada.getNome() + " e venceu a partida!");
-		}
+        // se acertou as 3 perguntas da rodada: conquista a estrela da categoria
+        Categoria conquistada = partida.getCategoriaRodadaAtual();
+        if (!jaConquistou(jogador, conquistada)) {
+            jogador.adicionarEstrela(conquistada);
+        }
 
-		//se nao conquistou todas e continua jogando, em uma nova categoria
-		boolean rodadaFormada = iniciarRodada(partida);
-		if (rodadaFormada) {
-			prepararPergunta(partida);
-			return new ResultadoRespostaDTO(true, true, true, false,
-					"Estrela de " + conquistada.getNome() + " conquistada! Nova rodada: "
-							+ partida.getCategoriaRodadaAtual().getNome() + ".");
-		}
-		return new ResultadoRespostaDTO(true, true, true, false,
-				"Estrela de " + conquistada.getNome() + " conquistada, mas não há 3 perguntas inéditas na próxima "
-						+ "categoria sorteada. Você perdeu a partida.");
-	}
+        //se ele conquistar todas as estrelas
+        if (jogador.getEstrelasConquistadas().size() >= categorias.size()) {
+            finalizar(partida, jogador);
+            return new ResultadoRespostaDTO(true, true, true, true,
+                    "Você conquistou a estrela de " + conquistada.getNome() + " e venceu a partida!");
+        }
 
+        //se nao conquistou todas e continua jogando, em uma nova categoria
+        boolean rodadaFormada = iniciarRodada(partida);
+        if (rodadaFormada) {
+            prepararPergunta(partida);
+            return new ResultadoRespostaDTO(true, true, true, false,
+                    "Estrela de " + conquistada.getNome() + " conquistada! Nova rodada: "
+                            + partida.getCategoriaRodadaAtual().getNome() + ".");
+        }
+        return new ResultadoRespostaDTO(true, true, true, false,
+                "Estrela de " + conquistada.getNome() + " conquistada, mas não há 3 perguntas inéditas na próxima "
+                        + "categoria sorteada. Você perdeu a partida.");
+    }
 
 	//Métodos de consulta
 	/**
@@ -224,13 +272,41 @@ public class PartidaService {
 	}
 
 
+    /**
+     * Motivo do fim da partida quando ela terminou por desconexão (ex.: "Bia desconectou. Ana venceu
+     * a partida."). Devolve null se a partida não terminou ou terminou normalmente.
+     */
+    public synchronized String getMotivoFim(int partidaId) {
+        obterPartida(partidaId);
+        return motivosFim.get(partidaId);
+    }
 
-	/**
-	 * Resposta errada ou tempo esgotado: registra o erro no histórico, passa a vez ao
-	 * adversário e monta a rodada dele. Se ele não tiver 3 perguntas inéditas, perde.
-	 * Usado tanto por responder() quanto por expirar(), para as duas situações
-	 * seguirem exatamente a mesma regra.
-	 */
+    /**
+     * Sinal de vida do cliente (ping). Chamado de tempos em tempos por cada jogador, o tempo todo,
+     * mesmo quando não é a vez dele. Depois do fim da partida o sinal é simplesmente ignorado.
+     */
+    public synchronized void registrarSinal(int partidaId, int jogadorId) {
+        Partida partida = obterPartida(partidaId);
+        jogadorDaPartida(partida, jogadorId); //valida o id do jogador
+        marcarSinal(partidaId, jogadorId);
+    }
+    
+    /** Saída voluntária (ex.: fechou a janela): a partida termina e o adversário vence. */
+    public synchronized void sairDaPartida(int partidaId, int jogadorId) {
+        Partida partida = obterPartida(partidaId);
+        Jogador quemSaiu = jogadorDaPartida(partida, jogadorId);
+        if (partida.isFinalizada()) {
+            return; //já tinha terminado: nada a fazer
+        }
+        encerrarPorDesconexao(partida, quemSaiu);
+    }
+
+    /**
+     * Resposta errada ou tempo esgotado: registra o erro no histórico, passa a vez ao
+     * adversário e monta a rodada dele. Se ele não tiver 3 perguntas inéditas, perde.
+     * Usado tanto por responder() quanto por expirar(), para as duas situações
+     * seguirem exatamente a mesma regra.
+     */
 	private ResultadoRespostaDTO processarErro(Partida partida, Jogador jogador, String motivo) {
 		historicoDAO.registrarResposta(partida.getIdPartida(), jogador.getId(),
 				perguntaAtual(partida).getIdPergunta(), false);
@@ -336,6 +412,89 @@ public class PartidaService {
 		return (int) Math.max(0, Math.ceil(restanteMs / 1000.0));
 	}
 
+	//Avisa que o estado mudou e a partida segue. Se ela acabou, o aviso de fim já saiu em finalizar().
+    private void notificarMudanca(int partidaId) {
+        PartidaListener o = ouvinte;
+        Partida p = partidas.get(partidaId);
+        if (o == null || p == null || p.isFinalizada()) {
+            return;
+        }
+        try {
+            o.placarAtualizado(partidaId);
+        } catch (RuntimeException e) {
+            e.printStackTrace(); //um erro ao avisar não pode desfazer a jogada
+        }
+    }
+
+    private void avisarFim(int partidaId) {
+        PartidaListener o = ouvinte;
+        if (o == null) {
+            return;
+        }
+        try {
+            o.partidaEncerrada(partidaId);
+        } catch (RuntimeException e) {
+            e.printStackTrace();
+        }
+    }
+
+    //Guarda o horário do último sinal do jogador; ignora partida encerrada ou jogador desconhecido
+    private void marcarSinal(int partidaId, int jogadorId) {
+        Map<Integer, Long> sinais = ultimosSinais.get(partidaId);
+        if (sinais != null && sinais.containsKey(jogadorId)) {
+            sinais.put(jogadorId, System.nanoTime());
+        }
+    }
+
+    /**
+     * Executado pela thread do relógio a cada INTERVALO_VIGIA_SEGUNDOS. Procura jogadores sem sinal
+     * há mais de SEGUNDOS_SEM_SINAL_PARA_DESCONECTAR e encerra a partida deles.
+     */
+    private synchronized void verificarConexoes() {
+        try {
+            long agora = System.nanoTime();
+            // cópia das chaves: encerrar a partida remove a entrada do mapa durante o laço
+            for (int partidaId : new ArrayList<>(ultimosSinais.keySet())) {
+                Partida partida = partidas.get(partidaId);
+                Map<Integer, Long> sinais = ultimosSinais.get(partidaId);
+                if (partida == null || sinais == null || partida.isFinalizada()) {
+                    continue;
+                }
+                // Se os dois sumiram juntos, perde o jogador 1 (a ordem é só um desempate)
+                for (Jogador jogador : List.of(partida.getJogador1(), partida.getJogador2())) {
+                    long semSinalMs = (agora - sinais.get(jogador.getId())) / 1_000_000;
+                    if (semSinalMs > SEGUNDOS_SEM_SINAL_PARA_DESCONECTAR * 1000L) {
+                        encerrarPorDesconexao(partida, jogador);
+                        break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // Erros dentro de tarefa agendada são engolidos em silêncio se não forem tratados;
+            // e uma exceção aqui cancelaria as próximas execuções do vigia
+            e.printStackTrace();
+        }
+    }
+
+    //Termina a partida porque um jogador saiu ou parou de responder: o adversário vence
+    private void encerrarPorDesconexao(Partida partida, Jogador quemSaiu) {
+        Jogador vencedor = adversario(partida, quemSaiu);
+        motivosFim.put(partida.getIdPartida(),
+                quemSaiu.getNome() + " desconectou. " + vencedor.getNome() + " venceu a partida.");
+        finalizar(partida, vencedor);
+    }
+
+    //Devolve o jogador da partida com esse id (1 ou 2); erro se o id não pertence à partida
+    private Jogador jogadorDaPartida(Partida partida, int jogadorId) {
+        if (partida.getJogador1().getId() == jogadorId) {
+            return partida.getJogador1();
+        }
+        if (partida.getJogador2().getId() == jogadorId) {
+            return partida.getJogador2();
+        }
+        throw new IllegalArgumentException("Jogador " + jogadorId + " não pertence à partida.");
+    }
+
 
 	/**
 	 * Método que inicia rodada: sorteia a categoria e monta a rodada com 3 perguntas ineditas
@@ -377,6 +536,8 @@ public class PartidaService {
 		vencedores.put(partida.getIdPartida(), vencedor);
 		perguntasDaRodada.remove(partida.getIdPartida());
 		cancelarRelogio(partida.getIdPartida()); //partida acabou: desarma o alarme
+		ultimosSinais.remove(partida.getIdPartida()); //e para de vigiar a conexão dos jogadores
+        avisarFim(partida.getIdPartida());
 	}
 
 	//Método que pega as 3 perguntas dessa partida

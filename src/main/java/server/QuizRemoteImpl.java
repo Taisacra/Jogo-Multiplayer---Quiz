@@ -2,120 +2,123 @@ package server;
 
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import common.dto.EntradaDTO;
 import common.dto.PerguntaDTO;
 import common.dto.PlacarDTO;
 import common.dto.ResultadoRespostaDTO;
+import common.remote.ClienteCallback;
 import common.remote.QuizRemote;
 import model.Jogador;
 import model.Partida;
+import service.PartidaListener;
 import service.PartidaService;
 
 /**
  * Objeto remoto do jogo: é a "porta de entrada" que os clientes enxergam pela rede.
  *
- * Esta classe não tem regra de jogo. Ela faz duas coisas:
+ * Ela faz três coisas:
  *  1. controla a fila de entrada (pareia o 1º e o 2º jogador numa partida);
  *  2. repassa as demais chamadas ao PartidaService, que concentra as regras e o relógio.
+ *	3. avisa os clientes por Callback quando algo muda - implementa o partidaListener
+ *
  *
  * ATENÇÃO: o PartidaService é criado aqui (campo "service"), e o construtor dele limpa o
  * histórico no banco. Por isso o banco precisa estar inicializado ANTES de criar esta classe
  * (ConexaoH2.inicializarBanco() no ServidorMain).
  */
 
-public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote{
+public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote, PartidaListener{
 
 	private static final long serialVersionUID = 1L;
 	
 	//Porta fixa do objeto remoto
 	public static final int PORTA_OBJETO = 1100;
-	
-	
-    /**
-     * Tempo máximo que o servidor espera por sinal do jogador que está na fila. O cliente do
-     * 1º jogador consulta a cada 1 ou 2 segundos (consultarEntrada); se passar este tempo sem
-     * nenhuma consulta, ele é considerado desistente e a vaga é liberada.
-     */
-
-	private static final long TEMPO_MAXIMO_SEM_SINAL_MS = 10_000;
-	
+		
 	private final PartidaService service = new PartidaService();
 	
 	//Fila de entrada
 	
+	private static final class Espera{
+		final String nome;
+		final ClienteCallback callback;
+		
+		Espera (String nome, ClienteCallback callback){
+			this.nome = nome;
+			this.callback = callback;
+		}
+		
+	}
+	
 	//Nome do 1o jogador -- null se ninguem espera
-	private String nomeEmEspera;
+	private Espera espera;
 
-	//Ultima vez que o 1o jogador deu sinal -- entrou ou consultou
-	private long ultimoSinalDoPrimeiro;
+	//Callbacks das partidas em andamento: partidaId -> (jogadorId -> callback do cliente)
+    private final transient Map<Integer, Map<Integer, ClienteCallback>> callbacks = new ConcurrentHashMap<>();
+    
+    // Uma thread por partida, para os avisos saírem na ordem e um cliente lento não atrasar as outras partidas
+    private final transient Map<Integer, ExecutorService> notificadores = new ConcurrentHashMap<>();
 	
-	//Preenchida quando o 2o jogador entra -- fica guardada ate o 1o jogador retira-la
-	private EntradaDTO entradaDoPrimeiro;
-	private long entradaDoPrimeiroCriadaEm;
-	
-    public QuizRemoteImpl() throws RemoteException {
-        super(PORTA_OBJETO); // exporta o objeto na porta fixa 1100
+    public QuizRemoteImpl() throws RemoteException{
+    	super(PORTA_OBJETO);
+    	service.setOuvinte(this);
     }
     
     //Entrada: 
     @Override
-    public synchronized EntradaDTO entrarNaPartida(String nomeJogador) {
+    public synchronized EntradaDTO entrarNaPartida(String nomeJogador, ClienteCallback callback) {
+    	
     	String nome = validarNome(nomeJogador);
+    	if (callback == null) {
+            throw new IllegalArgumentException("O callback do cliente não foi informado.");
+        }
+    	Espera novo = new Espera(nome, callback);
     	
-    	//Descarta caso o jogador desista
-    	if (entradaDoPrimeiro != null && passouDoLimite(entradaDoPrimeiroCriadaEm)) {
-            entradaDoPrimeiro = null;
+    	while (true) {
+    		
+            Espera primeiro;
+            
+            synchronized (this) {
+                if (espera == null) {
+                    // Ninguém esperando: este jogador é o 1º. O aviso de início chegará por callback.
+                    espera = novo;
+                    return new EntradaDTO(0, 1, false); // partidaId 0 = ainda não existe partida
+                }
+                primeiro = espera; // retira o 1º da fila
+                espera = null;
+            }
+
+            // Fora do bloqueio (a chamada é de rede): confere se o 1º ainda está conectado
+            if (estaConectado(primeiro.callback)) {
+                return iniciarPartida(primeiro, novo);
+            }
+            // O 1º sumiu enquanto esperava: descarta e tenta de novo (este jogador pode virar o 1º)
+            System.out.println("Jogador \"" + primeiro.nome + "\" saiu da fila sem avisar e foi descartado.");
         }
-    	
-    	//Ainda ha um par esperando o 1o jogador retirar a entrada
-    	if (entradaDoPrimeiro != null) {
-            throw new IllegalStateException("Já existe uma partida sendo formada. Tente novamente em instantes.");
-        }
-    	
-    	// O 1º jogador da fila parou de consultar: desistiu, então a vaga é liberada
-        if (nomeEmEspera != null && passouDoLimite(ultimoSinalDoPrimeiro)) {
-            nomeEmEspera = null;
-        }
-        
-        //Ninguém esperando: este jogador é o 1º e fica aguardando o adversário
-        if (nomeEmEspera == null) {
-            nomeEmEspera = nome;
-            ultimoSinalDoPrimeiro = System.nanoTime();
-            return new EntradaDTO(0, 1, false); // partidaId 0 - ainda nao comeca a partida
-        }
-        
-        //Já existe o 1o jogador esperando, este é o 2o jogador, e a partida pode começar
-        Partida partida = service.criarPartida(nomeEmEspera, nome);
+    }
+    
+    
+    private EntradaDTO iniciarPartida(Espera primeiro, Espera segundo) {
+        Partida partida = service.criarPartida(primeiro.nome, segundo.nome);
         int partidaId = partida.getIdPartida();
-        System.out.println("Partida " + partidaId + " criada: " + nomeEmEspera + " x " + nome
+
+        Map<Integer, ClienteCallback> daPartida = new ConcurrentHashMap<>();
+        daPartida.put(1, primeiro.callback); // quem entrou primeiro é o jogador 1
+        daPartida.put(2, segundo.callback);
+        callbacks.put(partidaId, daPartida);
+
+        System.out.println("Partida " + partidaId + " criada: " + primeiro.nome + " x " + segundo.nome
                 + ". Quem começa: " + partida.getJogadorDaVez().getNome());
-        
-        //Guarda a entrada do 1o jogador, que a retira em consultarEntrada()
-        entradaDoPrimeiro = new EntradaDTO(partidaId, 1, true);
-        entradaDoPrimeiroCriadaEm = System.nanoTime();
-        nomeEmEspera = null;
+
+        // Os dois recebem partidaIniciada e depois o 1º placar, por callback e nessa ordem
+        executorDa(partidaId).execute(() -> avisarInicio(partidaId));
 
         return new EntradaDTO(partidaId, 2, true);
     }
-    
-    
-    @Override
-    public synchronized EntradaDTO consultarEntrada() {
-        //O adversário já entrou - entrega os dados da partida (uma única vez)
-        if (entradaDoPrimeiro != null) {
-            EntradaDTO entrada = entradaDoPrimeiro;
-            entradaDoPrimeiro = null;
-            return entrada;
-        }
-
-        // Ainda esperando: a consulta serve também como sinal de vida do 1º jogador
-        if (nomeEmEspera != null) {
-            ultimoSinalDoPrimeiro = System.nanoTime();
-        }
-        return new EntradaDTO(0, 1, false);
-    }
-    
     
     //Repassa para o service
  
@@ -145,18 +148,143 @@ public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote{
         return vencedor == null ? null : vencedor.getNome();
     }
     
+    @Override
+    public void ping(int partidaId, int jogadorId) {
+        service.registrarSinal(partidaId, jogadorId);
+    }
+
+    @Override
+    public void sairDaPartida(int partidaId, int jogadorId) {
+        service.sairDaPartida(partidaId, jogadorId);
+    }
+
+    @Override
+    public String getMotivoFim(int partidaId) {
+        return service.getMotivoFim(partidaId);
+    }
     
-    //Métodos de validacao
+    //Eventos do Service
+    //Chamados de DENTRO do bloqueio do service: só enfileiram e voltam na hora.
+
+    @Override
+    public void placarAtualizado(int partidaId) {
+        try {
+            executorDa(partidaId).execute(() -> enviarPlacar(partidaId));
+        } catch (RuntimeException e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void partidaEncerrada(int partidaId) {
+        // remove o executor do mapa: depois do aviso de fim, a thread da partida é encerrada
+        ExecutorService executor = notificadores.remove(partidaId);
+        if (executor == null) {
+            return; // nenhum cliente foi registrado (ex.: a partida terminou ao ser criada)
+        }
+        try {
+            executor.execute(() -> enviarFim(partidaId));
+            executor.shutdown(); // conclui o que já está na fila (inclusive o aviso de fim) e encerra
+        } catch (RuntimeException e) {
+            e.printStackTrace();
+        }
+    }
+
+    //avisos aos clientes (threads por partida)
+
+    private void avisarInicio(int partidaId) {
+        Map<Integer, ClienteCallback> daPartida = callbacks.get(partidaId);
+        if (daPartida == null) {
+            return;
+        }
+        for (Map.Entry<Integer, ClienteCallback> jogador : daPartida.entrySet()) {
+            try {
+                jogador.getValue().partidaIniciada(partidaId, jogador.getKey());
+            } catch (RemoteException e) {
+                falhaNoCallback(partidaId, jogador.getKey());
+            }
+        }
+        enviarPlacar(partidaId);
+    }
+
+    private void enviarPlacar(int partidaId) {
+        Map<Integer, ClienteCallback> daPartida = callbacks.get(partidaId);
+        if (daPartida == null) {
+            return;
+        }
+        PlacarDTO placar = service.getPlacar(partidaId);
+        for (Map.Entry<Integer, ClienteCallback> jogador : daPartida.entrySet()) {
+            try {
+                jogador.getValue().placarAtualizado(partidaId, placar);
+            } catch (RemoteException e) {
+                falhaNoCallback(partidaId, jogador.getKey());
+            }
+        }
+    }
+
+    private void enviarFim(int partidaId) {
+        Map<Integer, ClienteCallback> daPartida = callbacks.remove(partidaId);
+        if (daPartida == null) {
+            return;
+        }
+        PlacarDTO placar = service.getPlacar(partidaId);
+        Jogador vencedor = service.getVencedor(partidaId);
+        String nomeVencedor = vencedor == null ? null : vencedor.getNome();
+        String motivo = service.getMotivoFim(partidaId);
+
+        for (ClienteCallback callback : daPartida.values()) {
+            try {
+                // o placar final vai junto: um placarAtualizado separado faria o cliente da vez pedir pergunta
+                callback.partidaEncerrada(partidaId, placar, nomeVencedor, motivo);
+            } catch (RemoteException e) {
+                // a partida já terminou; quem não responde simplesmente não fica sabendo
+            }
+        }
+    }
+
+    /**
+     * Um cliente não atendeu a chamada do servidor: ele caiu. Tira o callback dele (para não esperar
+     * de novo) e encerra a partida, dando a vitória ao adversário.
+     */
+    private void falhaNoCallback(int partidaId, int jogadorId) {
+        Map<Integer, ClienteCallback> daPartida = callbacks.get(partidaId);
+        if (daPartida != null) {
+            daPartida.remove(jogadorId);
+        }
+        System.out.println("Jogador " + jogadorId + " da partida " + partidaId
+                + " não respondeu ao callback: desconectado.");
+        try {
+            service.sairDaPartida(partidaId, jogadorId);
+        } catch (RuntimeException e) {
+            // partida inexistente ou já encerrada: nada a fazer
+        }
+    }
+
+    
+    //Métodos de apoio
+    
+    private ExecutorService executorDa(int partidaId) {
+        return notificadores.computeIfAbsent(partidaId, id -> Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "notificador-partida-" + id);
+            t.setDaemon(true); // não impede a JVM de encerrar
+            return t;
+        }));
+     }
+        
+    private static boolean estaConectado(ClienteCallback callback) {
+        try {
+            callback.verificarConexao();
+            return true;
+        } catch (RemoteException e) {
+            return false;
+        }
+    }
+        
     private static String validarNome(String nome) {
         if (nome == null || nome.trim().isEmpty()) {
             throw new IllegalArgumentException("Informe o nome do jogador.");
         }
         return nome.trim();
-    }
-
-    private static boolean passouDoLimite(long instanteEmNanos) {
-        long decorridoMs = (System.nanoTime() - instanteEmNanos) / 1_000_000;
-        return decorridoMs > TEMPO_MAXIMO_SEM_SINAL_MS;
     }
     
 }
