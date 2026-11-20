@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 import common.dto.PerguntaDTO;
 import common.dto.PlacarDTO;
 import common.dto.ResultadoRespostaDTO;
+import common.exception.*;
 import dao.CategoriaDAO;
 import dao.HistoricoRespostaDAO;
 import dao.PerguntaDAO;
@@ -112,10 +113,10 @@ public class PartidaService {
 
 
 	//Método que cria a partida
-	public synchronized Partida criarPartida(String nomeJogador1, String nomeJogador2) {
+	public synchronized Partida criarPartida(String nomeJogador1, String nomeJogador2) throws ErroInternoException {
 		List<Categoria> todas = categoriaDAO.buscarTodas();
 		if (todas.isEmpty()) {
-			throw new IllegalStateException("Nenhuma categoria cadastrada no banco de dados.");
+			throw new ErroInternoException();
 		}
 
 		categorias = todas;
@@ -147,30 +148,30 @@ public class PartidaService {
 
 
 	//Método que controla toda a partida - processa a resposta e depois avisa os clientes da mudança
-	public synchronized ResultadoRespostaDTO responder(int partidaId, int jogadorId, int perguntaId, char alternativa) {
+	public synchronized ResultadoRespostaDTO responder(int partidaId, int jogadorId, int perguntaId, char alternativa) throws NaoESuaVezException, PartidaNaoEncontradaException, PartidaEncerradaException, PerguntaInvalidaException {
 		ResultadoRespostaDTO resultado = processarResposta(partidaId, jogadorId, perguntaId, alternativa);
 		notificarMudanca(partidaId);
 		return resultado;
 	}
 
 	//Regras da resposta (o corpo que antes ficava direto em responder)
-	private ResultadoRespostaDTO processarResposta(int partidaId, int jogadorId, int perguntaId, char alternativa) {
+	private ResultadoRespostaDTO processarResposta(int partidaId, int jogadorId, int perguntaId, char alternativa) throws PartidaEncerradaException, PartidaNaoEncontradaException, NaoESuaVezException, PerguntaInvalidaException {
 
 		Partida partida = obterPartida(partidaId);
 		if (partida.isFinalizada()) {
-			throw new IllegalStateException("A partida já foi encerrada.");
+			throw new PartidaEncerradaException(partidaId);
 		}
 
 		marcarSinal(partidaId, jogadorId); //quem responde está claramente conectado
 
 		Jogador jogador = partida.getJogadorDaVez();
 		if (jogador.getId() != jogadorId) {
-			throw new IllegalStateException("Não é a vez deste jogador.");
+			throw new NaoESuaVezException(jogadorId);
 		}
 
 		Pergunta atual = perguntaAtual(partida);
 		if (atual.getIdPergunta() != perguntaId) {
-			throw new IllegalArgumentException("Esta não é a pergunta atual da rodada.");
+			throw new PerguntaInvalidaException(perguntaId);
 		}
 
 		//Confere o prazo: se a resposta chegou depois do limite, conta como tempo esgotado
@@ -231,13 +232,13 @@ public class PartidaService {
 	 * começa: na primeira vez que o jogador busca a pergunta. Chamadas repetidas para a
 	 * mesma pergunta só devolvem o tempo restante, sem reiniciar a contagem.
 	 */
-	public synchronized PerguntaDTO getPerguntaAtual(int partidaId, int jogadorId) {
+	public synchronized PerguntaDTO getPerguntaAtual(int partidaId, int jogadorId) throws PartidaEncerradaException, PartidaNaoEncontradaException, NaoESuaVezException {
 		Partida partida = obterPartida(partidaId);
 		if (partida.isFinalizada()) {
-			throw new IllegalStateException("A partida já foi encerrada.");
+			throw new PartidaEncerradaException(partidaId);
 		}
 		if (partida.getJogadorDaVez().getId() != jogadorId) {
-			throw new IllegalStateException("Não é a vez deste jogador.");
+			throw new NaoESuaVezException(jogadorId);
 		}
 
 		if (!prazos.containsKey(partidaId)) {
@@ -250,7 +251,7 @@ public class PartidaService {
 				segundosRestantes(partidaId));
 	}
 
-	public synchronized PlacarDTO getPlacar(int partidaId) {
+	public synchronized PlacarDTO getPlacar(int partidaId) throws PartidaNaoEncontradaException {
 		Partida p = obterPartida(partidaId);
 		return new PlacarDTO(
 				p.getJogador1().getNome(), nomesDasEstrelas(p.getJogador1()),
@@ -258,11 +259,11 @@ public class PartidaService {
 				p.getJogadorDaVez().getNome(), p.getJogadorDaVez().getId());
 	}
 
-	public synchronized Partida getPartida(int partidaId) {
+	public synchronized Partida getPartida(int partidaId) throws PartidaNaoEncontradaException {
 		return obterPartida(partidaId);
 	}
 
-	public synchronized boolean isFinalizada(int partidaId) {
+	public synchronized boolean isFinalizada(int partidaId) throws PartidaNaoEncontradaException {
 		return obterPartida(partidaId).isFinalizada();
 	}
 
@@ -276,7 +277,7 @@ public class PartidaService {
 	 * Motivo do fim da partida quando ela terminou por desconexão (ex.: "Bia desconectou. Ana venceu
 	 * a partida."). Devolve null se a partida não terminou ou terminou normalmente.
 	 */
-	public synchronized String getMotivoFim(int partidaId) {
+	public synchronized String getMotivoFim(int partidaId) throws PartidaNaoEncontradaException {
 		obterPartida(partidaId);
 		return motivosFim.get(partidaId);
 	}
@@ -285,14 +286,14 @@ public class PartidaService {
 	 * Sinal de vida do cliente (ping). Chamado de tempos em tempos por cada jogador, o tempo todo,
 	 * mesmo quando não é a vez dele. Depois do fim da partida o sinal é simplesmente ignorado.
 	 */
-	public synchronized void registrarSinal(int partidaId, int jogadorId) {
+	public synchronized void registrarSinal(int partidaId, int jogadorId) throws PartidaNaoEncontradaException, JogadorInvalidoException {
 		Partida partida = obterPartida(partidaId);
 		jogadorDaPartida(partida, jogadorId); //valida o id do jogador
 		marcarSinal(partidaId, jogadorId);
 	}
 
 	/** Saída voluntária (ex.: fechou a janela): a partida termina e o adversário vence. */
-	public synchronized void sairDaPartida(int partidaId, int jogadorId) {
+	public synchronized void sairDaPartida(int partidaId, int jogadorId) throws PartidaNaoEncontradaException, JogadorInvalidoException {
 		Partida partida = obterPartida(partidaId);
 		Jogador quemSaiu = jogadorDaPartida(partida, jogadorId);
 		if (partida.isFinalizada()) {
@@ -486,14 +487,14 @@ public class PartidaService {
 	}
 
 	//Devolve o jogador da partida com esse id (1 ou 2); erro se o id não pertence à partida
-	private Jogador jogadorDaPartida(Partida partida, int jogadorId) {
+	private Jogador jogadorDaPartida(Partida partida, int jogadorId) throws JogadorInvalidoException {
 		if (partida.getJogador1().getId() == jogadorId) {
 			return partida.getJogador1();
 		}
 		if (partida.getJogador2().getId() == jogadorId) {
 			return partida.getJogador2();
 		}
-		throw new IllegalArgumentException("Jogador " + jogadorId + " não pertence à partida.");
+		throw new JogadorInvalidoException(jogadorId);
 	}
 
 
@@ -547,10 +548,10 @@ public class PartidaService {
 		return rodada.get(partida.getPerguntasRespondidasNaRodada());
 	}
 
-	private Partida obterPartida(int partidaId) {
+	private Partida obterPartida(int partidaId) throws PartidaNaoEncontradaException {
 		Partida p = partidas.get(partidaId);
 		if (p == null) {
-			throw new IllegalArgumentException("Partida não encontrada: " + partidaId);
+			throw new PartidaNaoEncontradaException(partidaId);
 		}
 		return p;
 	}
