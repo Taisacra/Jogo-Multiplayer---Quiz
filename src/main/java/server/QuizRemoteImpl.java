@@ -71,7 +71,11 @@ public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote, P
 
     //Entrada: 
     @Override
-    public EntradaDTO entrarNaPartida(String nomeJogador, ClienteCallback callback) throws DadosInvalidosException {
+    public EntradaDTO entrarNaPartida(String nomeJogador, ClienteCallback callback) throws QuizException {
+        return proteger(() -> processarEntrada(nomeJogador, callback));
+    }
+
+    private EntradaDTO processarEntrada(String nomeJogador, ClienteCallback callback) throws QuizException {
 
         String nome = validarNome(nomeJogador);
         if (callback == null) {
@@ -103,7 +107,7 @@ public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote, P
     }
 
 
-    private EntradaDTO iniciarPartida(Espera primeiro, Espera segundo) throws ErroInternoException {
+    private EntradaDTO iniciarPartida(Espera primeiro, Espera segundo) throws QuizException {
         Partida partida = service.criarPartida(primeiro.nome, segundo.nome);
         int partidaId = partida.getIdPartida();
 
@@ -121,47 +125,89 @@ public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote, P
         return new EntradaDTO(partidaId, 2, true);
     }
 
-    //Repassa para o service
+    //Repassa para o service (cada chamada passa pelo proteger)
 
     @Override
-    public PerguntaDTO getPerguntaAtual(int partidaId, int jogadorId) throws NaoESuaVezException, PartidaNaoEncontradaException, PartidaEncerradaException {
-        return service.getPerguntaAtual(partidaId, jogadorId);
+    public PerguntaDTO getPerguntaAtual(int partidaId, int jogadorId) throws QuizException {
+        return proteger(() -> service.getPerguntaAtual(partidaId, jogadorId));
     }
 
     @Override
-    public ResultadoRespostaDTO responder(int partidaId, int jogadorId, int perguntaId, char alternativa) throws NaoESuaVezException, PartidaNaoEncontradaException, PerguntaInvalidaException, PartidaEncerradaException {
-        return service.responder(partidaId, jogadorId, perguntaId, alternativa);
+    public ResultadoRespostaDTO responder(int partidaId, int jogadorId, int perguntaId, char alternativa) throws QuizException {
+        return proteger(() -> service.responder(partidaId, jogadorId, perguntaId, alternativa));
     }
 
     @Override
-    public PlacarDTO getPlacar(int partidaId) throws PartidaNaoEncontradaException {
-        return service.getPlacar(partidaId);
+    public PlacarDTO getPlacar(int partidaId) throws QuizException {
+        return proteger(() -> service.getPlacar(partidaId));
     }
 
     @Override
-    public boolean isFinalizada(int partidaId) throws PartidaNaoEncontradaException {
-        return service.isFinalizada(partidaId);
+    public boolean isFinalizada(int partidaId) throws QuizException {
+        return proteger(() -> service.isFinalizada(partidaId));
     }
 
     @Override
-    public String getVencedor(int partidaId) {
-        Jogador vencedor = service.getVencedor(partidaId);
-        return vencedor == null ? null : vencedor.getNome();
+    public String getVencedor(int partidaId) throws QuizException {
+        return proteger(() -> {
+            Jogador vencedor = service.getVencedor(partidaId);
+            return vencedor == null ? null : vencedor.getNome();
+        });
     }
 
     @Override
-    public void ping(int partidaId, int jogadorId) throws PartidaNaoEncontradaException, JogadorInvalidoException {
-        service.registrarSinal(partidaId, jogadorId);
+    public void ping(int partidaId, int jogadorId) throws QuizException {
+        protegerSemRetorno(() -> service.registrarSinal(partidaId, jogadorId));
     }
 
     @Override
-    public void sairDaPartida(int partidaId, int jogadorId) throws PartidaNaoEncontradaException, JogadorInvalidoException {
-        service.sairDaPartida(partidaId, jogadorId);
+    public void sairDaPartida(int partidaId, int jogadorId) throws QuizException {
+        protegerSemRetorno(() -> service.sairDaPartida(partidaId, jogadorId));
     }
 
     @Override
-    public String getMotivoFim(int partidaId) throws PartidaNaoEncontradaException {
-        return service.getMotivoFim(partidaId);
+    public String getMotivoFim(int partidaId) throws QuizException {
+        return proteger(() -> service.getMotivoFim(partidaId));
+    }
+
+    //Tratador central de erros (faz o papel do @ControllerAdvice)
+
+    /** Uma chamada ao service que devolve um valor e pode lançar erro de regra do jogo. */
+    @FunctionalInterface
+    private interface Chamada<T> {
+        T executar() throws QuizException;
+    }
+
+    /** Uma chamada ao service que não devolve nada (void). */
+    @FunctionalInterface
+    private interface ChamadaSemRetorno {
+        void executar() throws QuizException;
+    }
+
+    /**
+     * Toda chamada remota passa por aqui:
+     *  - deu certo: devolve o valor;
+     *  - erro de regra do jogo (QuizException): segue para o cliente como está;
+     *  - qualquer outra falha (banco fora do ar, bug): vai para o log do SERVIDOR com a pilha completa,
+     *    e o cliente recebe só uma ErroInternoException genérica, sem detalhe interno.
+     */
+    private <T> T proteger(Chamada<T> chamada) throws QuizException {
+        try {
+            return chamada.executar();
+        } catch (QuizException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            System.err.println("Erro inesperado no servidor:");
+            e.printStackTrace();
+            throw new ErroInternoException();
+        }
+    }
+
+    private void protegerSemRetorno(ChamadaSemRetorno chamada) throws QuizException {
+        proteger(() -> {
+            chamada.executar();
+            return null;
+        });
     }
 
     //Eventos do Service
@@ -193,7 +239,7 @@ public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote, P
 
     //avisos aos clientes (threads por partida)
 
-    private void avisarInicio(int partidaId) throws PartidaNaoEncontradaException, JogadorInvalidoException {
+    private void avisarInicio(int partidaId) {
         Map<Integer, ClienteCallback> daPartida = callbacks.get(partidaId);
         if (daPartida == null) {
             return;
@@ -208,12 +254,18 @@ public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote, P
         enviarPlacar(partidaId);
     }
 
-    private void enviarPlacar(int partidaId) throws PartidaNaoEncontradaException, JogadorInvalidoException {
+    private void enviarPlacar(int partidaId) {
         Map<Integer, ClienteCallback> daPartida = callbacks.get(partidaId);
         if (daPartida == null) {
             return;
         }
-        PlacarDTO placar = service.getPlacar(partidaId);
+        PlacarDTO placar;
+        try {
+            placar = service.getPlacar(partidaId);
+        } catch (QuizException e) {
+            System.out.println("Placar não enviado (partida " + partidaId + "): " + e.getMessage());
+            return;
+        }
         for (Map.Entry<Integer, ClienteCallback> jogador : daPartida.entrySet()) {
             try {
                 jogador.getValue().placarAtualizado(partidaId, placar);
@@ -223,15 +275,22 @@ public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote, P
         }
     }
 
-    private void enviarFim(int partidaId) throws PartidaNaoEncontradaException {
+    private void enviarFim(int partidaId) {
         Map<Integer, ClienteCallback> daPartida = callbacks.remove(partidaId);
         if (daPartida == null) {
             return;
         }
-        PlacarDTO placar = service.getPlacar(partidaId);
+        PlacarDTO placar;
+        String motivo;
+        try {
+            placar = service.getPlacar(partidaId);
+            motivo = service.getMotivoFim(partidaId);
+        } catch (QuizException e) {
+            System.out.println("Aviso de fim não enviado (partida " + partidaId + "): " + e.getMessage());
+            return;
+        }
         Jogador vencedor = service.getVencedor(partidaId);
         String nomeVencedor = vencedor == null ? null : vencedor.getNome();
-        String motivo = service.getMotivoFim(partidaId);
 
         for (ClienteCallback callback : daPartida.values()) {
             try {
@@ -247,7 +306,7 @@ public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote, P
      * Um cliente não atendeu a chamada do servidor: ele caiu. Tira o callback dele (para não esperar
      * de novo) e encerra a partida, dando a vitória ao adversário.
      */
-    private void falhaNoCallback(int partidaId, int jogadorId) throws PartidaNaoEncontradaException, JogadorInvalidoException {
+    private void falhaNoCallback(int partidaId, int jogadorId) {
         Map<Integer, ClienteCallback> daPartida = callbacks.get(partidaId);
         if (daPartida != null) {
             daPartida.remove(jogadorId);
@@ -256,7 +315,7 @@ public class QuizRemoteImpl extends UnicastRemoteObject implements QuizRemote, P
                 + " não respondeu ao callback: desconectado.");
         try {
             service.sairDaPartida(partidaId, jogadorId);
-        } catch (RuntimeException e) {
+        } catch (QuizException e) {
             // partida inexistente ou já encerrada: nada a fazer
         }
     }

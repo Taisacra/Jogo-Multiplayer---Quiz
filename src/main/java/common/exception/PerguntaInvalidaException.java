@@ -11,6 +11,6 @@ public class PerguntaInvalidaException extends QuizException{
     }
 
     public PerguntaInvalidaException(int id) {
-        super("Esta não é a pergunta atual da partida. Pergunta" + id + "não existe");
+        super("Esta não é a pergunta atual da partida. A pergunta" + id + " não é uma pergunta atual da rodada.");
     }
 }

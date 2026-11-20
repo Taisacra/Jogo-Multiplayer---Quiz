@@ -11,6 +11,6 @@ public class JogadorInvalidoException extends QuizException{
     }
 
     public JogadorInvalidoException(int id) {
-        super("Jogador " + id + "não existe nesta partida.");
+        super("Jogador " + id + " não existe nesta partida.");
     }
 }

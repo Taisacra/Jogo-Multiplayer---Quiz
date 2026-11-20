@@ -12,6 +12,6 @@ public class PartidaEncerradaException extends QuizException{
     }
 
     public PartidaEncerradaException(int id) {
-        super("Partida " + id + "já foi encerrada.");
+        super("Partida " + id + " já foi encerrada.");
     }
 }

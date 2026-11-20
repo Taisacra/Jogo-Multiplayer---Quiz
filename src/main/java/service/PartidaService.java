@@ -166,7 +166,7 @@ public class PartidaService {
 
 		Jogador jogador = partida.getJogadorDaVez();
 		if (jogador.getId() != jogadorId) {
-			throw new NaoESuaVezException(jogadorId);
+			throw new NaoESuaVezException(jogador.getId());
 		}
 
 		Pergunta atual = perguntaAtual(partida);
@@ -238,7 +238,7 @@ public class PartidaService {
 			throw new PartidaEncerradaException(partidaId);
 		}
 		if (partida.getJogadorDaVez().getId() != jogadorId) {
-			throw new NaoESuaVezException(jogadorId);
+			throw new NaoESuaVezException(partida.getJogadorDaVez().getId());
 		}
 
 		if (!prazos.containsKey(partidaId)) {
